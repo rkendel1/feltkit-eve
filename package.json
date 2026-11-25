@@ -18,10 +18,10 @@
     "@appport/core": "1.13.0",
     "@appport/eve-world-feltdb": "0.1.2",
     "@appport/protocol": "1.8.0",
-    "@appport/resolver-client": "0.3.1",
+    "@appport/resolver-client": "0.3.2",
     "@appport/schema": "1.2.2",
     "@feltdb/core": ">=0.25.0 <0.26.0",
-    "@feltdb/feltkit": "0.5.0",
+    "@feltdb/feltkit": "0.5.3",
     "eve": "npm:@appport/eve@1.1.2",
     "react": "19.3.1",
     "react-dom": "19.3.1"

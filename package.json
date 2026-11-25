@@ -1,0 +1,42 @@
+{
+  "name": "eve",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Eve: an engineering agent application. The product on Vercel; the integrated eve agent on AppBoundry.",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "dev": "feltkit dev",
+    "build": "feltkit build",
+    "start": "feltkit start",
+    "test": "feltkit test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@appport/core": "1.13.0",
+    "@appport/eve-world-feltdb": "0.1.2",
+    "@appport/protocol": "1.8.0",
+    "@appport/resolver-client": "0.3.0",
+    "@appport/schema": "1.2.2",
+    "@feltdb/core": ">=0.25.0 <0.26.0",
+    "@feltdb/feltkit": "0.5.0",
+    "eve": "npm:@appport/eve@1.1.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.8"
+  },
+  "overrides": {
+    "eve": {
+      "vite": "$vite"
+    }
+  }
+}

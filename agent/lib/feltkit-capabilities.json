@@ -1,0 +1,428 @@
+{
+  "repo.changes.find": {
+    "capability": "repo.changes.find",
+    "tool": "repo_changes_find",
+    "description": "Find the branch and pull request of an operation, without changing anything.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "operation",
+        "branch"
+      ]
+    },
+    "approval": "none"
+  },
+  "repo.changes.get": {
+    "capability": "repo.changes.get",
+    "tool": "repo_changes_get",
+    "description": "Read a pull request back: state, head commit, files, and check runs.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "number": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "number"
+      ]
+    },
+    "approval": "none"
+  },
+  "repo.changes.publish": {
+    "capability": "repo.changes.publish",
+    "tool": "repo_changes_publish",
+    "description": "Publish the verified working copy: a deterministic commit on an eve/ branch and a pull request. A person approves it first. Never merges.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "expectTree": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "operation",
+        "branch",
+        "title",
+        "body",
+        "message",
+        "expectTree"
+      ]
+    },
+    "approval": "required"
+  },
+  "repo.issues.comment": {
+    "capability": "repo.issues.comment",
+    "tool": "repo_issues_comment",
+    "description": "Comment on an issue. A person approves it first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "number": {
+          "type": "number"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "number",
+        "operation",
+        "body"
+      ]
+    },
+    "approval": "required"
+  },
+  "repo.issues.create": {
+    "capability": "repo.issues.create",
+    "tool": "repo_issues_create",
+    "description": "Open an issue. A person approves it first. A repeat of the same operation returns the issue already opened.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "operation",
+        "title",
+        "body"
+      ]
+    },
+    "approval": "required"
+  },
+  "repo.issues.find": {
+    "capability": "repo.issues.find",
+    "tool": "repo_issues_find",
+    "description": "Find issues by words in the title (possible duplicates), or by an operation.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "repository"
+      ]
+    },
+    "approval": "none"
+  },
+  "repo.issues.get": {
+    "capability": "repo.issues.get",
+    "tool": "repo_issues_get",
+    "description": "Read an issue with its comments.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "number": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "number"
+      ]
+    },
+    "approval": "none"
+  },
+  "repo.workspace.diff": {
+    "capability": "repo.workspace.diff",
+    "tool": "repo_workspace_diff",
+    "description": "What changed in the working copy since its base commit, with the content tree.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspace"
+      ]
+    },
+    "approval": "none"
+  },
+  "repo.workspace.list": {
+    "capability": "repo.workspace.list",
+    "tool": "repo_workspace_list",
+    "description": "List a directory of the working copy.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspace"
+      ]
+    },
+    "approval": "none"
+  },
+  "repo.workspace.open": {
+    "capability": "repo.workspace.open",
+    "tool": "repo_workspace_open",
+    "description": "Open a working copy of a repository (by name, or restored at a base commit with given files). Preparation (install, build) runs in the background.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "content"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "workspace"
+      ]
+    },
+    "approval": "none"
+  },
+  "repo.workspace.read": {
+    "capability": "repo.workspace.read",
+    "tool": "repo_workspace_read",
+    "description": "Read a file (or a range of lines) of the working copy, with line numbers.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "startLine": {
+          "type": "number"
+        },
+        "endLine": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "path"
+      ]
+    },
+    "approval": "none"
+  },
+  "repo.workspace.result": {
+    "capability": "repo.workspace.result",
+    "tool": "repo_workspace_result",
+    "description": "The state of a check run, and its output once finished.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "run": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "run"
+      ]
+    },
+    "approval": "none"
+  },
+  "repo.workspace.run": {
+    "capability": "repo.workspace.run",
+    "tool": "repo_workspace_run",
+    "description": "Run a declared check (build, or test with a target path) on the working copy, or with against 'base' on the unmodified base commit with only the target test copied in. Results name the content tree they ran on.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "check": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "against": {
+          "type": "string",
+          "enum": [
+            "change",
+            "base"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "check"
+      ]
+    },
+    "approval": "none"
+  },
+  "repo.workspace.search": {
+    "capability": "repo.workspace.search",
+    "tool": "repo_workspace_search",
+    "description": "Search the working copy for a regular expression.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "pattern"
+      ]
+    },
+    "approval": "none"
+  },
+  "repo.workspace.status": {
+    "capability": "repo.workspace.status",
+    "tool": "repo_workspace_status",
+    "description": "Whether a working copy is open and prepared, with its content tree.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspace"
+      ]
+    },
+    "approval": "none"
+  },
+  "repo.workspace.write": {
+    "capability": "repo.workspace.write",
+    "tool": "repo_workspace_write",
+    "description": "Write a file of the working copy (whole content). Workflow files are refused.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "path",
+        "content"
+      ]
+    },
+    "approval": "none"
+  }
+}

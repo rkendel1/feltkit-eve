@@ -24,7 +24,7 @@ export const app = feltkit({
     operator: ["configuration.*", "credential.*", "jobs.*", "feltkit.operations.*"],
     // Workspace roles, highest first.
     owner: ["eve.*", "repo.*", "tenant.*", "feltkit.agent.read", "feltkit.agent.write", "feltkit.workers.write", "configuration.read", "jobs.create", "jobs.execute"],
-    member: ["eve.*", "repo.*", "feltkit.agent.read", "feltkit.agent.write", "configuration.read", "jobs.create", "jobs.execute"],
+    member: ["eve.read", "repo.*", "feltkit.agent.read", "feltkit.agent.write", "configuration.read", "jobs.create", "jobs.execute"],
     viewer: ["eve.read", "repo.read", "feltkit.agent.read", "configuration.read"],
     // The agent: reads repositories, works in workspaces, runs declared checks; publishing and filing need a person's
     // approval of the exact call (the provider's consequential capabilities).

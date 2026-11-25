@@ -72,7 +72,7 @@ export const resolve = app.action({
   returns: s.unknown(),
   capability: { name: "eve.bindings.resolve", description: "The model, repository and profile this session uses, resolved once per session through Resolver." },
   handler: async (ctx, { sessionId }) => {
-    const existing = await ctx.runQuery({ name: "bindings:forSession" } as never, { sessionId });
+    const existing = await ctx.runQuery({ name: "bindings:forSession" } as never, { sessionId } as never);
     if (existing) return existing;
     const refs = [];
     for (const [name, ref] of Object.entries(REFERENCES)) {
@@ -85,6 +85,52 @@ export const resolve = app.action({
         throw error;
       }
     }
-    return ctx.runMutation({ name: "bindings:record" } as never, { sessionId, refs });
+    return ctx.runMutation({ name: "bindings:record" } as never, { sessionId, refs } as never);
+  },
+});
+
+const KINDS: Record<keyof typeof REFERENCES, string> = { model: "model", repository: "value", profile: "value" };
+
+/** What each reference resolves to now (nothing recorded): the Resolver page's current bindings. */
+export const current = app.action({
+  access: "eve.read",
+  returns: s.unknown(),
+  handler: async () => {
+    const out = [];
+    for (const [name, ref] of Object.entries(REFERENCES)) {
+      try {
+        const r = (await resolver().resolve(ref)) as { kind?: string; revision: number; ttlSeconds?: number; updatedAt?: string; selected?: { value?: unknown } & Record<string, unknown> };
+        const target = r.selected ?? {};
+        out.push({ name, ref, kind: r.kind ?? KINDS[name as keyof typeof REFERENCES], revision: r.revision, ttlSeconds: r.ttlSeconds ?? null, updatedAt: r.updatedAt ?? null, value: "value" in target ? target.value : target });
+      } catch (error) {
+        out.push({ name, ref, kind: KINDS[name as keyof typeof REFERENCES], error: error instanceof ResolverClientError ? `${error.code}: ${error.message}` : String(error) });
+      }
+    }
+    return out;
+  },
+});
+
+let writer: ResolverClient | null = null;
+/**
+ * Change one of Eve's bindings in Resolver, as the operator's change: the next session uses it; running sessions keep
+ * theirs. Resolver authorizes it with this deployment's write key (RESOLVER_WRITE_KEY, granted write on Eve's references
+ * only) and records who asked in its history; a stale expectedRevision is refused, never overwritten.
+ */
+export const set = app.action({
+  access: "eve.configure",
+  args: { name: s.enum(["model", "repository", "profile"]), value: s.unknown(), expectedRevision: s.number(), reason: s.string({ minLength: 1, maxLength: 300 }) },
+  returns: s.unknown(),
+  handler: async (ctx, { name, value, expectedRevision, reason }) => {
+    const url = process.env.RESOLVER_URL;
+    const apiKey = process.env.RESOLVER_WRITE_KEY;
+    if (!url || !apiKey) fail("CONFIGURATION", "Changing bindings from Eve needs RESOLVER_WRITE_KEY (write on Eve's references). Without it, change them in Resolver itself.");
+    writer ??= new ResolverClient({ url, apiKey, live: false });
+    const ref = REFERENCES[name];
+    try {
+      return await writer.put({ ref, binding: { value }, expectedRevision, reason: `${reason} (by ${ctx.auth.principal?.id ?? "unknown"} in Eve)` } as never);
+    } catch (error) {
+      if (error instanceof ResolverClientError) fail(error.code === "CONFLICT" ? "CONFLICT" : "FAILED_PRECONDITION", `Resolver refused the change to ${ref}: ${error.message}`, { details: { ref, code: error.code } });
+      throw error;
+    }
   },
 });

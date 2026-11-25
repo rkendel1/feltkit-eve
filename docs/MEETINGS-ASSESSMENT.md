@@ -6,6 +6,32 @@ Date: 2026-11-25. Inputs: the code of `rkendel1/meetings` (branch `claude/gallan
 
 **Meetings invites Eve. Meetings does not host Eve. AppBoundry executes Eve.**
 
+## Identity: the organization owns Eve (decided 2026-11-25)
+
+Per-participant account linking is rejected. Three identities, never conflated:
+
+| Identity | Represents | Where it is decided |
+|---|---|---|
+| Organization | Who owns and administers Eve | Meetings: `orgAgents` (an administrator registers, disables, re-enables). Eve's app: the organization's workspace, where Eve is the worker |
+| Eve | The agent that participates and does work | Meetings: an external agent principal attending only while registered and active, only where invited. Eve's app: the workspace's worker |
+| Person | Who delegates and approves consequential work | Eve's app: a work grant from a person of the workspace (an organization delegation is still a person's grant, recorded as theirs), and approvals of exact calls |
+
+- Meeting membership decides what Eve may observe in that meeting, and nothing else.
+- Owning Eve grants nothing by itself. Repository and other external authority comes only from a delegation in Eve's
+  application, checked by AppPort on every call. Consequential calls also need a person's approval of the exact call.
+- Each consequential action records three things:
+  - which organization-owned Eve acted: the worker, plus the Meetings principal when the request came from a meeting;
+  - which person's delegation covered it: the grant ref and who issued it;
+  - which approval authorized it: the AppPort approval ref.
+
+**Implemented in Meetings** (`81418d1`):
+- `orgAgents` and `requireStanding`. An unregistered or disabled agent is refused, whoever invited it.
+- Disabling an agent removes it from running calls at once.
+- Tests: 46/46.
+
+**Not yet implemented** (needs FeltKit public API): starting an Eve session server-side under a standing delegation,
+for a request that arrives from a meeting. Today a session starts only from a signed-in person's request.
+
 ## 1. What already exists and is reused
 
 | Need | Existing mechanism |
@@ -68,7 +94,7 @@ The smallest set that keeps Meetings authoritative and adds no agent loop:
 **feltkit-eve:**
 - A `meetings` provider. It calls Meetings' AppPort/MCP capabilities with **Eve's own Meetings credential**, an agent identity issued by Meetings.
 - A watcher, deterministic and not a model. It heartbeats `meetings.join` for meetings Eve is invited to, follows `meetings.feed` with a durable cursor, and dispatches a session when a linked person addresses Eve.
-- An account link between a Meetings participant and an Eve person. Without one, Eve answers from meeting records only and does no repository work.
+- ~~An account link between a Meetings participant and an Eve person~~: superseded by organization ownership (above).
 
 ## 5. Required AppBoundry changes
 

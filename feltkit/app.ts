@@ -69,6 +69,8 @@ export const app = feltkit({
       displayName: "Eve",
       roles: ["agent"],
       tenantRole: "agent",
+      // Its tools, and all a person's grant names: the provider capabilities these functions call are their
+      // implementation (FeltKit authorizes them by the agent's role under the grant that covered the function).
       capabilities: ["repo.*"],
     },
   },

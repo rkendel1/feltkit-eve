@@ -1,7 +1,7 @@
 /**
  * Eve: an engineering agent application.
  *
- *   The product           this application's UI (src/), deployed to Vercel; Vercel forwards the API paths here.
+ *   The product           this application, UI (src/) and server together, deployed to Vercel.
  *   The authority         this application (FeltKit): accounts, workspaces, roles, the agent's work grants, approvals.
  *   The agent             an eve agent (agent/), run and supervised by FeltKit, its sessions in FeltDB; it acts only
  *                         through the capabilities below, as a workspace member, under the person's work grant.

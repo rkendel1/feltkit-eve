@@ -23,16 +23,19 @@ export const app = feltkit({
     // The application's operators: configuration and credentials for the whole environment.
     operator: ["configuration.*", "credential.*", "jobs.*", "feltkit.operations.*"],
     // Workspace roles, highest first.
-    owner: ["eve.*", "repo.*", "tenant.*", "feltkit.agent.read", "feltkit.agent.write", "feltkit.workers.write", "configuration.read", "jobs.create", "jobs.execute"],
-    member: ["eve.read", "repo.*", "feltkit.agent.read", "feltkit.agent.write", "configuration.read", "jobs.create", "jobs.execute"],
+    owner: ["eve.*", "repo.*", "meeting.*", "meetings.connect", "feltkit.agent.delegated", "tenant.*", "feltkit.agent.read", "feltkit.agent.write", "feltkit.workers.write", "configuration.read", "jobs.create", "jobs.execute"],
+    member: ["eve.read", "repo.*", "meeting.*", "feltkit.agent.read", "feltkit.agent.write", "configuration.read", "jobs.create", "jobs.execute"],
     viewer: ["eve.read", "repo.read", "feltkit.agent.read", "configuration.read"],
     // The agent: reads repositories, works in workspaces, runs declared checks; publishing and filing need a person's
     // approval of the exact call (the provider's consequential capabilities).
-    agent: ["eve.read", "eve.bind", "repo.read", "repo.work", "repo.publish", "feltkit.agent.write"],
+    agent: ["eve.read", "eve.bind", "repo.read", "repo.work", "repo.publish", "meeting.attend", "feltkit.agent.write"],
+    // The organization's Meetings application, with the API key it holds for this one: it may ask Eve to join or leave
+    // a meeting (feltkit/meetingsession.ts), starting her session under the organization's delegation; nothing else.
+    meetingsapp: ["meetings.connect", "feltkit.agent.delegated"],
   },
   auth: {
     accounts: { roles: ["person"] },
-    tenant: { name: "workspace", roles: ["owner", "member", "viewer", "agent"], create: "anyone" },
+    tenant: { name: "workspace", roles: ["owner", "member", "viewer", "agent", "meetingsapp"], create: "anyone" },
     // Vercel's router is one trusted proxy in front of the application: its X-Forwarded-Host is the page's host.
     session: { trustProxy: 1 },
   },
@@ -42,7 +45,7 @@ export const app = feltkit({
       { id: "lin", name: "Lin Chen", roles: ["person"] },
     ],
   },
-  services: { configuration: true },
+  services: { configuration: true, apiKeys: { roles: ["meetingsapp"] } },
   // GitHub (providers/github.mjs): the repositories Eve may work on, and the checks it may run in each. The token is the
   // application's credential `github-token` (FELTKIT_CREDENTIAL_GITHUB_TOKEN in production), never the agent's.
   providers: {
@@ -63,6 +66,14 @@ export const app = feltkit({
       },
       credentials: { "github-token": "github-token" },
     },
+    // Meetings (providers/meetings.mjs): Eve's own connection to the organization's Meetings application, with Eve's own
+    // Meetings key (credential `meetings-key`). It carries no repository or other authority.
+    meetings: {
+      module: "./providers/meetings.mjs",
+      export: "meetingsProvider",
+      config: { url: process.env.MEETINGS_URL ?? "http://127.0.0.1:3400" },
+      credentials: { "meetings-key": "meetings-key" },
+    },
   },
   eve: {
     engineer: {
@@ -71,7 +82,7 @@ export const app = feltkit({
       tenantRole: "agent",
       // Its tools, and all a person's grant names: the provider capabilities these functions call are their
       // implementation (FeltKit authorizes them by the agent's role under the grant that covered the function).
-      capabilities: ["repo.*", "eve.bindings.resolve"],
+      capabilities: ["repo.*", "meeting.*", "eve.bindings.resolve"],
       // Where Eve executes: on this machine (development, FeltKit runs it), or a remote executor that serves eve's
       // session protocol (the AppBoundry .app; until it exists, eve's own server started on its own as a reference).
       ...(process.env.EVE_EXECUTOR_URL ? { executor: { url: process.env.EVE_EXECUTOR_URL, serviceKey: process.env.EVE_EXECUTOR_SERVICE_KEY ?? "" } } : {}),

@@ -28,7 +28,7 @@ export const app = feltkit({
     viewer: ["eve.read", "repo.read", "feltkit.agent.read", "configuration.read"],
     // The agent: reads repositories, works in workspaces, runs declared checks; publishing and filing need a person's
     // approval of the exact call (the provider's consequential capabilities).
-    agent: ["eve.read", "repo.read", "repo.work", "repo.publish", "feltkit.agent.write"],
+    agent: ["eve.read", "eve.bind", "repo.read", "repo.work", "repo.publish", "feltkit.agent.write"],
   },
   auth: {
     accounts: { roles: ["person"] },
@@ -71,7 +71,7 @@ export const app = feltkit({
       tenantRole: "agent",
       // Its tools, and all a person's grant names: the provider capabilities these functions call are their
       // implementation (FeltKit authorizes them by the agent's role under the grant that covered the function).
-      capabilities: ["repo.*"],
+      capabilities: ["repo.*", "eve.bindings.resolve"],
     },
   },
 });

@@ -1,4 +1,22 @@
 {
+  "eve.bindings.resolve": {
+    "capability": "eve.bindings.resolve",
+    "tool": "eve_bindings_resolve",
+    "description": "The model, repository and profile this session uses, resolved once per session through Resolver.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ]
+    },
+    "approval": "none"
+  },
   "repo.changes.find": {
     "capability": "repo.changes.find",
     "tool": "repo_changes_find",

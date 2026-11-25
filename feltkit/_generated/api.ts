@@ -2,7 +2,8 @@
 /* eslint-disable */
 import { createApi } from "@feltdb/feltkit/client";
 import type * as app_module from "../app.js";
+import type * as bindings_module from "../bindings.js";
 import type * as repo_module from "../repo.js";
 
 /** Typed references to every query and mutation. Type-only imports: no backend code reaches the browser. */
-export const api = createApi<{ "app": typeof app_module; "repo": typeof repo_module }>();
+export const api = createApi<{ "app": typeof app_module; "bindings": typeof bindings_module; "repo": typeof repo_module }>();

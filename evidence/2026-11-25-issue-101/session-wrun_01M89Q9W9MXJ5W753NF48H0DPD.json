@@ -1,0 +1,515 @@
+{
+ "kind": "message",
+ "at": "2026-11-25T16:06:00.942Z",
+ "text": "Resolve issue #101 in rkendel1/appboundry. Read the issue first (repo_issues_get). Then: open a working copy named fix-101; wait until it is prepared (repo_workspace_status). Write the regression test the issue describes at packages/appboundry-host/test/tenancy-commit-outcome.test.ts. Run it with check \"test\" and target packages/appboundry-host/test/tenancy-commit-outcome.test.ts against \"base\": it must fail on its assertions there. Fix packages/appboundry-host/src/tenancy.ts as the issue suggests (map FeltDB errors the way collections.ts commitError does; only a precondition failure is CONFLICT), keeping the change minimal. Run the same test against \"change\": it must pass. Also run the existing packages/appboundry-host/test/tenancy.test.ts against \"change\". Then look at the diff, and publish it (repo_changes_publish) with operation \"resolve-101\", branch \"eve/issue-101-tenancy-commit-outcome\", the diff tree as expectTree, a title starting \"Resolve #101:\", and a body that says what changed and which test results you got (base and change). Finally read the pull request back (repo_changes_get) and report its number, URL and files. Never merge."
+}
+{
+ "kind": "model",
+ "at": "2026-11-25T16:06:00.989Z",
+ "runId": "run_0",
+ "outcome": "completed"
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:06:02.211Z",
+ "callId": "toolu_01Lqha8CaHypC38qJHWF33NS",
+ "tool": "repo_issues_get",
+ "capability": "repo.issues.get",
+ "input": {
+  "repository": "rkendel1/appboundry",
+  "number": 101
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "number": 101,
+  "title": "tenancy@1 commit reports any FeltDB failure, including an unconfirmed commit, as a CONFLICT where 'nothing was written'",
+  "state": "open",
+  "url": "https://github.com/rkendel1/appboundry/issues/101",
+  "author": "rkendel1",
+  "labels": [],
+  "body": "TenancyTransaction.commit() catches every error from db.transaction() and rethrows it as HostError CONFLICT with the message 'nothing was written'. It does not look at the error. When FeltDB answers COMMIT_OUTCOME_UNKNOWN or DURABILITY_FAILURE, the transaction may already have been applied. ArtifactHost.tenancy() awaits tx.commit() (host.ts:463), so the caller is told the membership or tenant change did not happen and that retrying is safe. A retried provision mints a fresh crypto.token tenant id and creates a second organization or membership. The collections path maps the same FeltDB codes to OUTCOME_UNKNOWN (collections.ts commitError, lines 191-196); the tenancy path does not. The new test simulates an authority that applies the write and then loses the acknowledgement: the write lands, yet commit() rejects with code CONFLICT and 'nothing was written'.\n\n**Severity:** medium\n\n### Evidence\n\n1. [`packages/appboundry-host/src/tenancy.ts` lines 76–80](https://github.com/rkendel1/appboundry/blob/cd32300380a6ac5735b02891218f56814dfa8ac5/packages/appboundry-host/src/tenancy.ts#L76-L80):\n\n```\n    try {\n      await this.#db.transaction({ operations } as never);\n    } catch (error) {\n      throw new HostError(\"CONFLICT\", `The membership change conflicted with a concurrent one; nothing was written. (${(error as Error).message})`);\n    }\n```\n\n2. [`packages/appboundry-host/src/collections.ts` lines 191–192](https://github.com/rkendel1/appboundry/blob/cd32300380a6ac5735b02891218f56814dfa8ac5/packages/appboundry-host/src/collections.ts#L191-L192):\n\n```\n  if (error.code === FeltDBErrorCode.COMMIT_OUTCOME_UNKNOWN || error.code === FeltDBErrorCode.DURABILITY_FAILURE) {\n    return new HostError(\"OUTCOME_UNKNOWN\", `FeltDB could not confirm the commit (${error.code}); the mutation may or may not have been written.`, {\n```\n\n3. `test packages/appboundry-host/test/tenancy-commit-outcome.test.ts` fails on its assertions at cd32300380a6.\n\n### Reproduction\n\n<details><summary><code>packages/appboundry-host/test/tenancy-commit-outcome.test.ts</code> (fails today)</summary>\n\n```ts\n/**\n * A tenancy@1 commit whose outcome FeltDB could not confirm must not be reported as a conflict in which\n * nothing was written: the write may have landed, and a caller that retries a provision on that answer\n * creates a second organization (a fresh crypto.token id each time).\n */\nimport { describe, expect, it } from \"vitest\";\nimport { FeltDBErrorCode } from \"@feltdb/core\";\nimport { TenancyTransaction } from \"../src/tenancy.js\";\n\nfunction fakeDb() {\n  const written: unknown[] = [];\n  const db = {\n    collection: () => ({ get: async () => null }),\n    query: async () => ({ records: [], exhausted: true }),\n    // The authority applies the transaction, then the acknowledgement is lost.\n    transaction: async (request: { operations: unknown[] }) => {\n      written.push(...request.operations);\n      throw Object.assign(new Error(\"commit outcome unknown\"), { code: FeltDBErrorCode.COMMIT_OUTCOME_UNKNOWN });\n    }\n  };\n  return { db, written };\n}\n\ndescribe(\"tenancy@1 commit outcome\", () => {\n  it(\"does not report an unconfirmed commit as a conflict that wrote nothing\", async () => {\n    const { db, written } = fakeDb();\n    const tx = new TenancyTransaction(db as never);\n    expect(await tx.get(\"_feltkit_tenants\", \"t1\")).toBeNull();\n    tx.create(\"_feltkit_tenants\", \"t1\", { name: \"Acme\" });\n    const error = (await tx.commit().then(() => null, e => e)) as { code?: string; message?: string } | null;\n    expect(error).not.toBeNull();\n    expect(written.length).toBe(1);\n    // The record was written; the host must not tell the caller it was not.\n    expect(error!.code).not.toBe(\"CONFLICT\");\n    expect(error!.message).not.toMatch(/nothing was written/);\n  });\n});\n\n```\n</details>\n\n### Suggested fix\n\nIn TenancyTransaction.commit(), map FeltDB errors as commitError does. Only PRECONDITION_FAILED becomes CONFLICT ('nothing was written'). COMMIT_OUTCOME_UNKNOWN and DURABILITY_FAILURE become OUTCOME_UNKNOWN, with a hint to read before retrying. Contract violations and refusals keep their own codes, for example via feltdbRefusal/feltdbFailure. Also pass a stable transactionId so FeltDB can deduplicate a resend.\n\n### How this was verified\n\n- packages/appboundry-host/src/tenancy.ts:76-80 contains the quoted code\n- packages/appboundry-host/src/collections.ts:191-192 contains the quoted code\n- packages/appboundry-host/test/tenancy-commit-outcome.test.ts fails on its assertions at tree f89a99602225 (base cd32300380a6 plus tests)\n\nFound and verified by Eve2 (task `mww5a689032ad2811ec6`, rkendel1/appboundry@cd32300380a6): the quoted lines were re-read and the reproduction re-run before filing.\n\n<!-- eve2:operation=mww5a689032ad2811ec6:issue:54303c6d27b14f36 -->\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_",
+  "comments": []
+ }
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:06:02.608Z",
+ "callId": "toolu_01T5ak4XWZZgC7VxzsnQtgvP",
+ "tool": "repo_workspace_open",
+ "capability": "repo.workspace.open",
+ "input": {
+  "repository": "rkendel1/appboundry",
+  "workspace": "fix-101"
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "workspace": "fix-101",
+  "repository": "rkendel1/appboundry",
+  "base": "main",
+  "sha": "d600e7a9515563b1f35811ee84fe8eb2c95ad2c0",
+  "tree": "812cd9fe002b34640312cc898218c8dd885ed536",
+  "checks": [
+   "build",
+   "test"
+  ],
+  "restored": false
+ }
+}
+{
+ "kind": "model",
+ "at": "2026-11-25T16:06:05.307Z",
+ "runId": "run_1",
+ "outcome": "completed"
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:06:06.463Z",
+ "callId": "toolu_013rf6Susr9rdWgesYq37dn1",
+ "tool": "repo_workspace_status",
+ "capability": "repo.workspace.status",
+ "input": {
+  "workspace": "fix-101"
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "workspace": "fix-101",
+  "sha": "d600e7a9515563b1f35811ee84fe8eb2c95ad2c0",
+  "prepared": true,
+  "tree": "812cd9fe002b34640312cc898218c8dd885ed536"
+ }
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:06:06.990Z",
+ "callId": "toolu_01ENp6FxvAcEbNki1W9p4qy6",
+ "tool": "repo_workspace_read",
+ "capability": "repo.workspace.read",
+ "input": {
+  "workspace": "fix-101",
+  "path": "packages/appboundry-host/src/tenancy.ts"
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "path": "packages/appboundry-host/src/tenancy.ts",
+  "sha": "d600e7a9515563b1f35811ee84fe8eb2c95ad2c0",
+  "startLine": 1,
+  "endLine": 146,
+  "totalLines": 146,
+  "content": "1\t/**\n2\t * Host interface `tenancy@1` (FK-GAP-013): organizations for an artifact that declares them.\n3\t *\n4\t * The guest owns the logic: it carries its producer's tenancy (FeltKit: tenants, memberships, roles,\n5\t * rank rules, claims) and runs it over the host operations answered here, on the reserved collections\n6\t * `_feltkit_tenants`, `_feltkit_memberships` and `_feltkit_invitations` (the producer's names, so an\n7\t * organization's records have one shape on every runtime). The host owns sessions: it stores which\n8\t * tenant a session selected, asks the guest for the caller's live membership there (`context`) on every\n9\t * request, and passes it as `principal.tenant`, whose role joins the principal's roles. No membership:\n10\t * no tenant, so tenant-scoped collections stay closed (the guest refuses them).\n11\t *\n12\t * Invocation: `{ tenancy: { op, input }, principal, permissions, operator?, requestId, environment }`.\n13\t * Host operations in a tenancy invocation (only on the three collections):\n14\t *   db.get, db.query                 reads, each recording the version it saw\n15\t *   db.create, db.replace, db.delete writes, committed together when the invocation returns, each\n16\t *                                    conditioned on absence or on the version read (a concurrent change\n17\t *                                    makes the whole operation a CONFLICT; nothing is half-written)\n18\t *   crypto.token                     random bytes for tenant ids\n19\t * In a function invocation: `tenancy.read` (get / query) for ctx.tenancy.members, never a write.\n20\t */\n21\timport type { StateFirstDB } from \"@feltdb/core\";\n22\timport { HostError } from \"./collections.js\";\n23\t\n24\texport const TENANCY_COLLECTIONS = [\"_feltkit_tenants\", \"_feltkit_memberships\", \"_feltkit_invitations\"] as const;\n25\t\n26\texport function tenancyCollection(name: unknown): string {\n27\t  const collection = String(name);\n28\t  if (!(TENANCY_COLLECTIONS as readonly string[]).includes(collection)) throw new HostError(\"FORBIDDEN\", `tenancy@1 reaches only its own collections, not \"${collection}\".`);\n29\t  return collection;\n30\t}\n31\t\n32\ttype Write = { collection: string; id: string; kind: \"create\" | \"replace\" | \"delete\"; value?: Record<string, unknown> };\n33\t\n34\t/** One tenancy@1 operation's reads and writes over the host's FeltDB. */\n35\texport class TenancyTransaction {\n36\t  readonly #db: StateFirstDB;\n37\t  readonly #seen = new Map<string, number | null>();\n38\t  readonly #pending = new Map<string, Write>();\n39\t  constructor(db: StateFirstDB) {\n40\t    this.#db = db;\n41\t  }\n42\t  #key(collection: string, id: string): string {\n43\t    return `${collection}\\u0000${id}`;\n44\t  }\n45\t  async get(collection: string, id: string): Promise<Record<string, unknown> | null> {\n46\t    const pending = this.#pending.get(this.#key(collection, id));\n47\t    if (pending) return pending.kind === \"delete\" ? null : { ...pending.value, id };\n48\t    const record = ((await this.#db.collection<Record<string, unknown>>(collection).get(id)) ?? null) as (Record<string, unknown> & { __version?: number }) | null;\n49\t    this.#seen.set(this.#key(collection, id), record?.__version ?? null);\n50\t    return record;\n51\t  }\n52\t  query(collection: string, request: unknown): Promise<unknown> {\n53\t    const rest = request && typeof request === \"object\" ? (request as Record<string, unknown>) : {};\n54\t    return this.#db.query({ ...rest, collection } as never);\n55\t  }\n56\t  create(collection: string, id: string, value: Record<string, unknown>): void {\n57\t    this.#pending.set(this.#key(collection, id), { collection, id, kind: \"create\", value });\n58\t  }\n59\t  replace(collection: string, id: string, value: Record<string, unknown>): void {\n60\t    if (!this.#seen.get(this.#key(collection, id))) throw new HostError(\"FAILED_PRECONDITION\", `tenancy@1 replaces only a record it read first (${collection}/${id}).`);\n61\t    this.#pending.set(this.#key(collection, id), { collection, id, kind: \"replace\", value });\n62\t  }\n63\t  delete(collection: string, id: string): void {\n64\t    if (!this.#seen.get(this.#key(collection, id))) throw new HostError(\"FAILED_PRECONDITION\", `tenancy@1 deletes only a record it read first (${collection}/${id}).`);\n65\t    this.#pending.set(this.#key(collection, id), { collection, id, kind: \"delete\" });\n66\t  }\n67\t  async commit(): Promise<void> {\n68\t    if (!this.#pending.size) return;\n69\t    const operations = [...this.#pending.entries()].map(([key, w]) =>\n70\t      w.kind === \"create\"\n71\t        ? { collection: w.collection, id: w.id, requireAbsent: true, value: { ...w.value, id: w.id } }\n72\t        : w.kind === \"replace\"\n73\t          ? { collection: w.collection, id: w.id, ifVersion: this.#seen.get(key), value: { ...w.value, id: w.id } }\n74\t          : { collection: w.collection, id: w.id, ifVersion: this.#seen.get(key) }\n75\t    );\n76\t    try {\n77\t      await this.#db.transaction({ operations } as never);\n78\t    } catch (error) {\n79\t      throw new HostError(\"CONFLICT\", `The membership change conflicted with a concurrent one; nothing was written. (${(error as Error).message})`);\n80\t    }\n81\t  }\n82\t}\n83\t\n84\t/** Answer one host operation of a tenancy@1 invocation. */\n85\texport async function tenancyOperation(call: Record<string, unknown>, tx: TenancyTransaction, 
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:06:07.740Z",
+ "callId": "toolu_01WVFWa1HwZWcA3mxqprE3ko",
+ "tool": "repo_workspace_read",
+ "capability": "repo.workspace.read",
+ "input": {
+  "workspace": "fix-101",
+  "path": "packages/appboundry-host/src/collections.ts",
+  "startLine": 1,
+  "endLine": 220
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "path": "packages/appboundry-host/src/collections.ts",
+  "sha": "d600e7a9515563b1f35811ee84fe8eb2c95ad2c0",
+  "startLine": 1,
+  "endLine": 220,
+  "totalLines": 560,
+  "content": "1\t/**\n2\t * Host interface `collections@1`: an artifact's records, in FeltDB.\n3\t *\n4\t * The guest asks; this module decides. Every operation names a collection, which must be\n5\t * declared by the manifest and granted to the artifact (permissions.collections). Every\n6\t * record written is validated here against the collection's JSON Schema from the\n7\t * manifest, whatever the guest checked. A query's operations can only read.\n8\t *\n9\t * A mutation's writes are buffered here, per call, and committed as ONE FeltDB atomic\n10\t * transaction when the handler returns (nothing is written if it fails):\n11\t *   - inserts are `requireAbsent` creates;\n12\t *   - updates and deletes carry `ifVersion` = the version the call observed;\n13\t *   - records the call read by id but did not write become preconditions;\n14\t *   - find/query/count capture FeltDB read bases before reading, re-checked at commit, so\n15\t *     a concurrent change to anything matching their equality predicate fails the commit\n16\t *     (CONFLICT); a read with no equality clause fences the collection's change marker.\n17\t * Reads inside a mutation see its own pending writes. These are the semantics FeltKit\n18\t * gives `ctx.db` (FeltKit runtime/data.ts), kept here so an artifact behaves the same.\n19\t */\n20\timport { classifyError, FeltDBErrorCode, FeltDBServiceError, type StateFirstDB } from \"@feltdb/core\";\n21\timport { fromJSONSchema, type Schema } from \"@appport/schema\";\n22\timport { randomBytes } from \"node:crypto\";\n23\timport type { ArtifactManifest } from \"./manifest.js\";\n24\timport { countAll, readAll } from \"./paged-read.js\";\n25\t\n26\t/** Per-collection change markers (see the module comment). */\n27\texport const COLLECTION_MARKERS = \"_appboundry_collections\";\n28\tconst MAX_FIND = 10_000;\n29\t\n30\texport class HostError extends Error {\n31\t  readonly code: string;\n32\t  readonly details?: unknown;\n33\t  readonly hint?: string;\n34\t  constructor(code: string, message: string, options: { details?: unknown; hint?: string; cause?: unknown } = {}) {\n35\t    super(message, options.cause === undefined ? undefined : { cause: options.cause });\n36\t    this.name = \"HostError\";\n37\t    this.code = code;\n38\t    if (options.details !== undefined) this.details = options.details;\n39\t    if (options.hint !== undefined) this.hint = options.hint;\n40\t  }\n41\t\n42\t  toJSON(): { code: string; message: string; details?: unknown; hint?: string } {\n43\t    return { code: this.code, message: this.message, ...(this.details !== undefined ? { details: this.details } : {}), ...(this.hint !== undefined ? { hint: this.hint } : {}) };\n44\t  }\n45\t}\n46\t\n47\ttype AnyDoc = Record<string, unknown> & { id: string; __version: number };\n48\t\n49\tinterface WhereClause {\n50\t  field: string;\n51\t  eq?: unknown;\n52\t  neq?: unknown;\n53\t  lt?: unknown;\n54\t  lte?: unknown;\n55\t  gt?: unknown;\n56\t  gte?: unknown;\n57\t}\n58\t\n59\tinterface OrderBy {\n60\t  field: string;\n61\t  direction: \"asc\" | \"desc\";\n62\t}\n63\t\n64\tinterface Pending {\n65\t  collection: string;\n66\t  id: string;\n67\t  op: \"insert\" | \"update\" | \"delete\";\n68\t  value?: Record<string, unknown>;\n69\t  baseVersion?: number;\n70\t}\n71\t\n72\texport interface CommittedWrite {\n73\t  collection: string;\n74\t  id: string;\n75\t  op: \"insert\" | \"update\" | \"delete\";\n76\t  expectedVersion?: number;\n77\t}\n78\t\n79\texport function newId(): string {\n80\t  return `${Date.now().toString(36)}${randomBytes(6).toString(\"hex\")}`;\n81\t}\n82\t\n83\tconst isRecord = (value: unknown): value is Record<string, unknown> => typeof value === \"object\" && value !== null && !Array.isArray(value);\n84\t\n85\tfunction stripSystem(value: Record<string, unknown>): Record<string, unknown> {\n86\t  const { id: _id, __version: _v, ...rest } = value;\n87\t  return rest;\n88\t}\n89\t\n90\tfunction compare(a: unknown, b: unknown): number {\n91\t  if (a === b) return 0;\n92\t  if (a === undefined || a === null) return -1;\n93\t  if (b === undefined || b === null) return 1;\n94\t  if (typeof a === \"number\" && typeof b === \"number\") return a - b;\n95\t  return String(a) < String(b) ? -1 : 1;\n96\t}\n97\t\n98\tfunction matchesWhere(record: Record<string, unknown>, where: WhereClause[]): boolean {\n99\t  return where.every(clause => {\n100\t    const value = record[clause.field];\n101\t    if (\"eq\" in clause && clause.eq !== undefined && value !== clause.eq) return false;\n102\t    if (\"neq\" in clause && clause.neq !== undefined && value === clause.neq) return false;\n103\t    if (clause.lt !== undefined && !(compare(value, clause.lt) < 0)) return false;\n104\t    if (clause.lte !== undefined && !(compare(value, clause.lte) <= 0)) return false;\n105\t    if (clause.gt !== undefined && !(compare(value, clause.gt) > 0)) return false;\n106\t    if (clause.gte !== undefined && !(compare(value, clause.gte) >= 0)) return false;\n107\t    return true;\n108\t  });\n109\t}\n110\t\n111\tfunction sortRecords<T extends Record<string, unknown>>(records: T[], orderBy: OrderBy[] = []): T[] {\n112\t  return [...records].sort((a, b) => {\n113\t    for (const order of orderBy) {\n114\t      const c = compare(a[order.field], b[order.field]);\n115\t      if (c !== 0) return order.direction === \"desc\" ? -c : c;\n116\t    }\n117\t    return compare(a.id, b.id);\n118\t  });\n119\t}\n120
+{
+ "kind": "model",
+ "at": "2026-11-25T16:06:20.450Z",
+ "runId": "run_2",
+ "outcome": "completed"
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:06:25.058Z",
+ "callId": "toolu_01SbeykBrY27YgcRddTrzsBD",
+ "tool": "repo_workspace_search",
+ "capability": "repo.workspace.search",
+ "input": {
+  "workspace": "fix-101",
+  "pattern": "CONFLICT|PRECONDITION_FAILED|transaction",
+  "path": "packages/appboundry-host/test/tenancy.test.ts"
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "pattern": "CONFLICT|PRECONDITION_FAILED|transaction",
+  "matches": [],
+  "truncated": false
+ }
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:06:29.869Z",
+ "callId": "toolu_01S2ftaFUvDtouLXftwf18Cw",
+ "tool": "repo_workspace_write",
+ "capability": "repo.workspace.write",
+ "input": {
+  "workspace": "fix-101",
+  "path": "packages/appboundry-host/test/tenancy-commit-outcome.test.ts",
+  "content": "/**\n * A tenancy@1 commit whose outcome FeltDB could not confirm must not be reported as a conflict in which\n * nothing was written: the write may have landed, and a caller that retries a provision on that answer\n * creates a second organization (a fresh crypto.token id each time).\n */\nimport { describe, expect, it } from \"vitest\";\nimport { FeltDBErrorCode } from \"@feltdb/core\";\nimport { TenancyTransaction } from \"../src/tenancy.js\";\n\nfunction fakeDb() {\n  const written: unknown[] = [];\n  const db = {\n    collection: () => ({ get: async () => null }),\n    query: async () => ({ records: [], exhausted: true }),\n    // The authority applies the transaction, then the acknowledgement is lost.\n    transaction: async (request: { operations: unknown[] }) => {\n      written.push(...request.operations);\n      throw Object.assign(new Error(\"commit outcome unknown\"), { code: FeltDBErrorCode.COMMIT_OUTCOME_UNKNOWN });\n    }\n  };\n  return { db, written };\n}\n\ndescribe(\"tenancy@1 commit outcome\", () => {\n  it(\"does not report an unconfirmed commit as a conflict that wrote nothing\", async () => {\n    const { db, written } = fakeDb();\n    const tx = new TenancyTransaction(db as never);\n    expect(await tx.get(\"_feltkit_tenants\", \"t1\")).toBeNull();\n    tx.create(\"_feltkit_tenants\", \"t1\", { name: \"Acme\" });\n    const error = (await tx.commit().then(() => null, e => e)) as { code?: string; message?: string } | null;\n    expect(error).not.toBeNull();\n    expect(written.length).toBe(1);\n    // The record was written; the host must not tell the caller it was not.\n    expect(error!.code).not.toBe(\"CONFLICT\");\n    expect(error!.message).not.toMatch(/nothing was written/);\n  });\n});\n"
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "path": "packages/appboundry-host/test/tenancy-commit-outcome.test.ts",
+  "bytes": 1685,
+  "sha256": "7210b5a76637c5a726e1c12bfddee62051d21568cc5789a51af0049a9a0d81d4",
+  "tree": "7055b5996580c247834f8f3b0d37f85fbeeb0288"
+ }
+}
+{
+ "kind": "model",
+ "at": "2026-11-25T16:06:29.992Z",
+ "runId": "run_3",
+ "outcome": "completed"
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:06:31.650Z",
+ "callId": "toolu_01CMurc8fqUsJdh8NVrFYb9n",
+ "tool": "repo_workspace_run",
+ "capability": "repo.workspace.run",
+ "input": {
+  "workspace": "fix-101",
+  "check": "test",
+  "target": "packages/appboundry-host/test/tenancy-commit-outcome.test.ts",
+  "against": "base"
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "id": "run_524f9d0683",
+  "workspace": "fix-101",
+  "check": "test",
+  "target": "packages/appboundry-host/test/tenancy-commit-outcome.test.ts",
+  "against": "base",
+  "state": "finished",
+  "startedAt": "2026-11-25T16:06:32.275Z",
+  "tree": "7055b5996580c247834f8f3b0d37f85fbeeb0288",
+  "exitCode": 1,
+  "signal": null,
+  "durationMs": 1288,
+  "output": "\n RUN  v3.2.7 /tmp/eve-workspaces/fix-101-base\n\n ❯ packages/appboundry-host/test/tenancy-commit-outcome.test.ts (1 test | 1 failed) 12ms\n   × tenancy@1 commit outcome > does not report an unconfirmed commit as a conflict that wrote nothing 10ms\n     → expected 'CONFLICT' not to be 'CONFLICT' // Object.is equality\n\n⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯\n\n FAIL  packages/appboundry-host/test/tenancy-commit-outcome.test.ts > tenancy@1 commit outcome > does not report an unconfirmed commit as a conflict that wrote nothing\nAssertionError: expected 'CONFLICT' not to be 'CONFLICT' // Object.is equality\n ❯ packages/appboundry-host/test/tenancy-commit-outcome.test.ts:34:29\n     32|     expect(written.length).toBe(1);\n     33|     // The record was written; the host must not tell the caller it wa…\n     34|     expect(error!.code).not.toBe(\"CONFLICT\");\n       |                             ^\n     35|     expect(error!.message).not.toMatch(/nothing was written/);\n     36|   });\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯\n\n\n Test Files  1 failed (1)\n      Tests  1 failed (1)\n   Start at  16:06:48\n   Duration  532ms (transform 104ms, setup 0ms, collect 240ms, tests 12ms, environment 0ms, prepare 91ms)\n\n"
+ }
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:06:32.250Z",
+ "callId": "toolu_01HKy5Y9w74Fa6HhwEVgh4YA",
+ "tool": "repo_workspace_search",
+ "capability": "repo.workspace.search",
+ "input": {
+  "workspace": "fix-101",
+  "pattern": "CONFLICT",
+  "path": "packages/appboundry-host/test"
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "pattern": "CONFLICT",
+  "matches": [
+   {
+    "path": "packages/appboundry-host/test/artifact-host.test.ts",
+    "line": 108,
+    "text": "      expect(await host.call(\"projects:create\", { name: \"Launch\" }, { principal: ada, via: \"test\" })).toMatchObject({ ok: false, error: { code: \"CONFLICT\" } });"
+   },
+   {
+    "path": "packages/appboundry-host/test/capabilities.test.ts",
+    "line": 105,
+    "text": "    expect(conflict).toMatchObject({ ok: true, value: { outcome: \"refused\", error: { code: \"CONFLICT\" } } });"
+   },
+   {
+    "path": "packages/appboundry-host/test/fixtures/tasks.app/assets/assets/index-Bq1Z0AoR.js",
+    "line": 11,
+    "text": "`))>=0;){const w=L.slice(0,M);L=L.slice(M+2);const X=/^event: (.+)$/m.exec(w)?.[1],hl=/^data: (.+)$/m.exec(w)?.[1];if(!X||!hl)continue;const al=JSON.parse(hl);X===\"change\"&&this.#s(al.collections),(X===\"ready\"&&!N||X===\"reload\")&&this.#s([\""
+   },
+   {
+    "path": "packages/appboundry-host/test/managed-acceptance.test.ts",
+    "line": 113,
+    "text": "        expect(seen).toMatchObject({ forbidden: \"FORBIDDEN\", anonymous: \"UNAUTHORIZED\", once: true, reused: \"CONFLICT\" });"
+   },
+   {
+    "path": "packages/appboundry-host/test/managed-acceptance.test.ts",
+    "line": 115,
+    "text": "        expect(seen.racers.every(r => r === \"ok\" || r === \"CONFLICT\")).toBe(true);"
+   },
+   {
+    "path": "packages/appboundry-host/test/managed-acceptance.test.ts",
+    "line": 277,
+    "text": "      expect(seen).toMatchObject({ forbidden: \"FORBIDDEN\", anonymous: \"UNAUTHORIZED\", once: true, reused: \"CONFLICT\" });"
+   },
+   {
+    "path": "packages/appboundry-host/test/managed-acceptance.test.ts",
+    "line": 279,
+    "text": "      expect(seen.racers.every(r => r === \"ok\" || r === \"CONFLICT\")).toBe(true);"
+   },
+   {
+    "path": "packages/appboundry-host/test/managed-acceptance.test.ts",
+    "line": 500,
+    "text": "    await expect(open(localDir)).rejects.toMatchObject({ code: \"CONFLICT\" });"
+   },
+   {
+    "path": "packages/appboundry-host/test/managed-acceptance.test.ts",
+    "line": 501,
+    "text": "    await expect(ArtifactHost.open({ artifact: await loadArtifact(TASKS_FIXTURE), stateDir: join(work, \"install-a\"), environment: \"production\", jobIntervalMs: 0 })).rejects.toMatchObject({ code: \"CONFLICT\" });"
+   },
+   {
+    "path": "packages/appboundry-host/test/managed-acceptance.test.ts",
+    "line": 502,
+    "text": "    await expect(open(join(work, \"install-a\"), { environment: \"staging\" })).rejects.toMatchObject({ code: \"CONFLICT\" });"
+   },
+   {
+    "path": "packages/appboundry-host/test/managed-acceptance.test.ts",
+    "line": 512,
+    "text": "  it(\"answers a contract promoted while it runs with CONFLICT once, without resending, then runs under the new contract\", async () => {"
+   },
+   {
+    "path": "packages/appboundry-host/test/managed-acceptance.test.ts",
+    "line": 525,
+    "text": "      expect(first, JSON.stringify(first)).toMatchObject({ ok: false, error: { code: \"CONFLICT\" } });"
+   },
+   {
+    "path": "packages/appboundry-host/test/managed-acceptance.test.ts",
+    "line": 572,
+    "text": "    await expect(restoreBackup(text, join(work, \"restore-into-managed\"), { managed: config() })).rejects.toMatchObject({ code: \"CONFLICT\" });"
+   },
+   {
+    "path": "packages/appboundry-host/test/outbox-outcome.test.ts",
+    "line": 27,
+    "text": "      if (op.ifVersion !== record.__version) throw new Error(\"CONFLICT\");"
+   },
+   {
+    "path": "packages/appboundry-host/test/production-ops.test.ts",
+    "line": 139,
+    "text": "      await expect(host.admin(a => a.bootstrap(local, { operator: \"other\" }))).rejects.toMatchObject({ code: \"CONFLICT\" });"
+   },
+   {
+    "path": "packages/appboundry-host/test/production-ops.test.ts",
+    "line": 174,
+    "text": "      await expect(host.admin(a => a.issueSession(ops, { user: \"grace\" }))).rejects.toMatchObject({ code: \"CONFLICT\" });"
+   },
+   {
+    "path": "packages/appboundry-host/test/production-ops.test.ts",
+    "line": 192,
+    "text": "    await expect(ArtifactHost.open({ artifact: await loadArtifact(TASKS_FIXTURE), stateDir, environment: \"development\", jobIntervalMs: 0 })).rejects.toMatchObject({ code: \"CONFLICT\", message: expect.stringContaining(\"bound to production\") }"
+   },
+   {
+    "path": "packages/appboundry-host/test/production-ops.test.ts",
+    "line": 326,
+    "text": "    await expect(restoreBackup(text, join(work, \"state\"))).rejects.toMatchObject({ code: \"CONFLICT\", message: expect.stringContaining(\"not empty\") });"
+   },
+   {
+    "path": "packages/appboundry-host/test/production-ops.test.ts",
+    "line": 331,
+    "text": "    await expect(restoreBackup(text, join(work, \"c\"), { applicationId: \"other-app\" })).rejects.toMatchObject({ code: \"CONFLICT\" });"
+   },
+   {
+    "path": "packages/appboundry-host/test/production-ops.test.ts",
+    "line": 345,
+    "text": "    await expect(production(fresh)).rejects.toMatchObject({ code: \"CONFLICT\", message: expect.stringContaining(\"did not complete\") });"
+   },
+   {
+    "path": "packages/appboundry-host/test/production-ops.test.ts",
+    "line": 361,
+    "text": "    expect(await host.call(\"tasks:create\", { projectId, title: \"different\" }, { principal: ada, via: \"test\", idempotencyKey: \"create-once\" })).toMatchObject({ ok: false, error: { code: \"CONFLICT\" } });"
+   },
+   {
+    "path": "packages/appboundry-host/test/state-contract.test.ts",
+    "line": 86,
+    "text": "      expect(await app.code(\"data:insert\", { collection: \"vendors\", value: { name: \"Copy\", taxId: \"NL1\" } })).toBe(\"CONFLICT
+{
+ "kind": "model",
+ "at": "2026-11-25T16:06:49.335Z",
+ "runId": "run_4",
+ "outcome": "completed"
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:07:14.324Z",
+ "callId": "toolu_01TgsnmpZswspehTvAbortzt",
+ "tool": "repo_workspace_write",
+ "capability": "repo.workspace.write",
+ "input": {
+  "workspace": "fix-101",
+  "path": "packages/appboundry-host/src/tenancy.ts",
+  "content": "/**\n * Host interface `tenancy@1` (FK-GAP-013): organizations for an artifact that declares them.\n *\n * The guest owns the logic: it carries its producer's tenancy (FeltKit: tenants, memberships, roles,\n * rank rules, claims) and runs it over the host operations answered here, on the reserved collections\n * `_feltkit_tenants`, `_feltkit_memberships` and `_feltkit_invitations` (the producer's names, so an\n * organization's records have one shape on every runtime). The host owns sessions: it stores which\n * tenant a session selected, asks the guest for the caller's live membership there (`context`) on every\n * request, and passes it as `principal.tenant`, whose role joins the principal's roles. No membership:\n * no tenant, so tenant-scoped collections stay closed (the guest refuses them).\n *\n * Invocation: `{ tenancy: { op, input }, principal, permissions, operator?, requestId, environment }`.\n * Host operations in a tenancy invocation (only on the three collections):\n *   db.get, db.query                 reads, each recording the version it saw\n *   db.create, db.replace, db.delete writes, committed together when the invocation returns, each\n *                                    conditioned on absence or on the version read (a concurrent change\n *                                    makes the whole operation a CONFLICT; nothing is half-written)\n *   crypto.token                     random bytes for tenant ids\n * In a function invocation: `tenancy.read` (get / query) for ctx.tenancy.members, never a write.\n */\nimport { FeltDBErrorCode, type StateFirstDB } from \"@feltdb/core\";\nimport { feltdbRefusal, HostError } from \"./collections.js\";\n\nexport const TENANCY_COLLECTIONS = [\"_feltkit_tenants\", \"_feltkit_memberships\", \"_feltkit_invitations\"] as const;\n\nexport function tenancyCollection(name: unknown): string {\n  const collection = String(name);\n  if (!(TENANCY_COLLECTIONS as readonly string[]).includes(collection)) throw new HostError(\"FORBIDDEN\", `tenancy@1 reaches only its own collections, not \"${collection}\".`);\n  return collection;\n}\n\ntype Write = { collection: string; id: string; kind: \"create\" | \"replace\" | \"delete\"; value?: Record<string, unknown> };\n\n/**\n * A FeltDB failure of a tenancy@1 commit, mapped as collections.ts commitError does: only a failed\n * precondition is a CONFLICT in which nothing was written; an unconfirmed commit may have landed.\n */\nfunction tenancyCommitError(error: unknown): unknown {\n  if (error instanceof HostError) return error;\n  const code = (error as { code?: unknown } | null)?.code;\n  const details = { feltdbCode: code };\n  if (code === FeltDBErrorCode.PRECONDITION_FAILED) {\n    return new HostError(\"CONFLICT\", `The membership change conflicted with a concurrent one; nothing was written. (${(error as Error).message})`, { details, cause: error });\n  }\n  if (code === FeltDBErrorCode.COMMIT_OUTCOME_UNKNOWN || code === FeltDBErrorCode.DURABILITY_FAILURE) {\n    return new HostError(\"OUTCOME_UNKNOWN\", `FeltDB could not confirm the membership change (${String(code)}); it may or may not have been written.`, {\n      details,\n      hint: \"Read the tenant and membership records before acting again; retrying a provision may create a second organization.\",\n      cause: error\n    });\n  }\n  return feltdbRefusal(error) ?? error;\n}\n\n/** One tenancy@1 operation's reads and writes over the host's FeltDB. */\nexport class TenancyTransaction {\n  readonly #db: StateFirstDB;\n  readonly #seen = new Map<string, number | null>();\n  readonly #pending = new Map<string, Write>();\n  constructor(db: StateFirstDB) {\n    this.#db = db;\n  }\n  #key(collection: string, id: string): string {\n    return `${collection}\\u0000${id}`;\n  }\n  async get(collection: string, id: string): Promise<Record<string, unknown> | null> {\n    const pending = this.#pending.get(this.#key(collection, id));\n    if (pending) return pending.kind === \"delete\" ? null : { ...pending.value, id };\n    const record = ((await this.#db.collection<Record<string, unknown>>(collection).get(id)) ?? null) as (Record<string, unknown> & { __version?: number }) | null;\n    this.#seen.set(this.#key(collection, id), record?.__version ?? null);\n    return record;\n  }\n  query(collection: string, request: unknown): Promise<unknown> {\n    const rest = request && typeof request === \"object\" ? (request as Record<string, unknown>) : {};\n    return this.#db.query({ ...rest, collection } as never);\n  }\n  create(collection: string, id: string, value: Record<string, unknown>): void {\n    this.#pending.set(this.#key(collection, id), { collection, id, kind: \"create\", value });\n  }\n  replace(collection: string, id: string, value: Record<string, unknown>): void {\n    if (!this.#seen.get(this.#key(collection, id))) throw new HostError(\"FAILED_PRECONDITION\", `tenancy@1 replaces only a record it read first (${collection}/${id}).`);\n    this.#pending.set(this.#key(collection, id), { collection, id, kind: \"replace\", value });\n  }\n  delete(collection: string, id: string): void {\n    if (!this.#seen.get(this.#key(collection, id))) throw new HostError(\"FAILED_PRECONDITION\", `tenancy@1 deletes only a record it read first (${collection}/${id}).`);\n    this.#pending.set(this.#key(collection, id), { collection, id, kind: \"delete\" });\n  }\n  async commit(): Promise<void> {\n    if (!this.#pending.size) return;\n    const operations = [...this.#pending.entries()].map(([key, w]) =>\n      w.kind === \"create\"\n        ? { collection: w.collection, id: w.id, requireAbsent: true, value: { ...w.value, id: w.id } }\n        : w.kind === \"replace\"\n          ? { collection
+{
+ "kind": "model",
+ "at": "2026-11-25T16:07:14.497Z",
+ "runId": "run_5",
+ "outcome": "completed"
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:07:16.448Z",
+ "callId": "toolu_01JsNg4Z4WYmtbxMvXNu7S8k",
+ "tool": "repo_workspace_run",
+ "capability": "repo.workspace.run",
+ "input": {
+  "workspace": "fix-101",
+  "check": "test",
+  "target": "packages/appboundry-host/test/tenancy-commit-outcome.test.ts",
+  "against": "change"
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "id": "run_d6567326ad",
+  "workspace": "fix-101",
+  "check": "test",
+  "target": "packages/appboundry-host/test/tenancy-commit-outcome.test.ts",
+  "against": "change",
+  "state": "finished",
+  "startedAt": "2026-11-25T16:07:17.726Z",
+  "tree": "9a80f21063ef423d8b872290dd6f12eb076dd916",
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 1935,
+  "output": "\n RUN  v3.2.7 /tmp/eve-workspaces/fix-101\n\n ✓ packages/appboundry-host/test/tenancy-commit-outcome.test.ts (1 test) 5ms\n\n Test Files  1 passed (1)\n      Tests  1 passed (1)\n   Start at  16:07:18\n   Duration  865ms (transform 200ms, setup 0ms, collect 337ms, tests 5ms, environment 0ms, prepare 140ms)\n\n"
+ }
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:07:17.303Z",
+ "callId": "toolu_012Zz8JcHPmX97dkMaTsAphU",
+ "tool": "repo_workspace_run",
+ "capability": "repo.workspace.run",
+ "input": {
+  "workspace": "fix-101",
+  "check": "test",
+  "target": "packages/appboundry-host/test/tenancy.test.ts",
+  "against": "change"
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "id": "run_c2cceb04a1",
+  "workspace": "fix-101",
+  "check": "test",
+  "target": "packages/appboundry-host/test/tenancy.test.ts",
+  "against": "change",
+  "state": "finished",
+  "startedAt": "2026-11-25T16:07:17.731Z",
+  "tree": "9a80f21063ef423d8b872290dd6f12eb076dd916",
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 5594,
+  "output": "\n RUN  v3.2.7 /tmp/eve-workspaces/fix-101\n\n ✓ packages/appboundry-host/test/tenancy.test.ts (7 tests) 2478ms\n   ✓ tenancy@1 > loads without operator acceptance: the artifact requires tenancy@1 and the host serves it  385ms\n   ✓ tenancy@1 > create, provision, switch, read and write; sessions are independent  576ms\n   ✓ tenancy@1 > cross-organization access and switching into a foreign organization are refused  413ms\n   ✓ tenancy@1 > a removed member loses the organization on the next request; a role change applies on the next request  336ms\n   ✓ tenancy@1 > concurrent membership changes: the same provisioning twice gives one membership  325ms\n\n Test Files  1 passed (1)\n      Tests  7 passed (7)\n   Start at  16:07:18\n   Duration  4.59s (transform 647ms, setup 0ms, collect 1.58s, tests 2.48s, environment 0ms, prepare 168ms)\n\n"
+ }
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:07:17.698Z",
+ "callId": "toolu_011C2j2HsvnXseLm8sFsjDYm",
+ "tool": "repo_workspace_run",
+ "capability": "repo.workspace.run",
+ "input": {
+  "workspace": "fix-101",
+  "check": "build"
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "id": "run_6800c45591",
+  "workspace": "fix-101",
+  "check": "build",
+  "target": null,
+  "against": "change",
+  "state": "finished",
+  "startedAt": "2026-11-25T16:07:17.740Z",
+  "tree": "9a80f21063ef423d8b872290dd6f12eb076dd916",
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 4415,
+  "output": "\n> appport-monorepo@1.0.0 build /tmp/eve-workspaces/fix-101\n> tsc -b tsconfig.build.json\n\n"
+ }
+}
+{
+ "kind": "model",
+ "at": "2026-11-25T16:07:23.456Z",
+ "runId": "run_6",
+ "outcome": "completed"
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:07:24.612Z",
+ "callId": "toolu_012uU4jBQaxyvYof7jm2Y4uy",
+ "tool": "repo_workspace_diff",
+ "capability": "repo.workspace.diff",
+ "input": {
+  "workspace": "fix-101"
+ },
+ "effect": "changed",
+ "started": true,
+ "outcome": "completed",
+ "output": {
+  "base": "d600e7a9515563b1f35811ee84fe8eb2c95ad2c0",
+  "tree": "9a80f21063ef423d8b872290dd6f12eb076dd916",
+  "files": [
+   {
+    "path": "packages/appboundry-host/src/tenancy.ts",
+    "additions": 24,
+    "deletions": 3
+   },
+   {
+    "path": "packages/appboundry-host/test/tenancy-commit-outcome.test.ts",
+    "additions": 37,
+    "deletions": 0
+   }
+  ],
+  "patch": "diff --git a/packages/appboundry-host/src/tenancy.ts b/packages/appboundry-host/src/tenancy.ts\nindex 0a8494d..55d0436 100644\n--- a/packages/appboundry-host/src/tenancy.ts\n+++ b/packages/appboundry-host/src/tenancy.ts\n@@ -18,8 +18,8 @@\n  *   crypto.token                     random bytes for tenant ids\n  * In a function invocation: `tenancy.read` (get / query) for ctx.tenancy.members, never a write.\n  */\n-import type { StateFirstDB } from \"@feltdb/core\";\n-import { HostError } from \"./collections.js\";\n+import { FeltDBErrorCode, type StateFirstDB } from \"@feltdb/core\";\n+import { feltdbRefusal, HostError } from \"./collections.js\";\n \n export const TENANCY_COLLECTIONS = [\"_feltkit_tenants\", \"_feltkit_memberships\", \"_feltkit_invitations\"] as const;\n \n@@ -31,6 +31,27 @@ export function tenancyCollection(name: unknown): string {\n \n type Write = { collection: string; id: string; kind: \"create\" | \"replace\" | \"delete\"; value?: Record<string, unknown> };\n \n+/**\n+ * A FeltDB failure of a tenancy@1 commit, mapped as collections.ts commitError does: only a failed\n+ * precondition is a CONFLICT in which nothing was written; an unconfirmed commit may have landed.\n+ */\n+function tenancyCommitError(error: unknown): unknown {\n+  if (error instanceof HostError) return error;\n+  const code = (error as { code?: unknown } | null)?.code;\n+  const details = { feltdbCode: code };\n+  if (code === FeltDBErrorCode.PRECONDITION_FAILED) {\n+    return new HostError(\"CONFLICT\", `The membership change conflicted with a concurrent one; nothing was written. (${(error as Error).message})`, { details, cause: error });\n+  }\n+  if (code === FeltDBErrorCode.COMMIT_OUTCOME_UNKNOWN || code === FeltDBErrorCode.DURABILITY_FAILURE) {\n+    return new HostError(\"OUTCOME_UNKNOWN\", `FeltDB could not confirm the membership change (${String(code)}); it may or may not have been written.`, {\n+      details,\n+      hint: \"Read the tenant and membership records before acting again; retrying a provision may create a second organization.\",\n+      cause: error\n+    });\n+  }\n+  return feltdbRefusal(error) ?? error;\n+}\n+\n /** One tenancy@1 operation's reads and writes over the host's FeltDB. */\n export class TenancyTransaction {\n   readonly #db: StateFirstDB;\n@@ -76,7 +97,7 @@ export class TenancyTransaction {\n     try {\n       await this.#db.transaction({ operations } as never);\n     } catch (error) {\n-      throw new HostError(\"CONFLICT\", `The membership change conflicted with a concurrent one; nothing was written. (${(error as Error).message})`);\n+      throw tenancyCommitError(error);\n     }\n   }\n }\ndiff --git a/packages/appboundry-host/test/tenancy-commit-outcome.test.ts b/packages/appboundry-host/test/tenancy-commit-outcome.test.ts\nnew file mode 100644\nindex 0000000..bf84eec\n--- /dev/null\n+++ b/packages/appboundry-host/test/tenancy-commit-outcome.test.ts\n@@ -0,0 +1,37 @@\n+/**\n+ * A tenancy@1 commit whose outcome FeltDB could not confirm must not be reported as a conflict in which\n+ * nothing was written: the write may have landed, and a caller that retries a provision on that answer\n+ * creates a second organization (a fresh crypto.token id each time).\n+ */\n+import { describe, expect, it } from \"vitest\";\n+import { FeltDBErrorCode } from \"@feltdb/core\";\n+import { TenancyTransaction } from \"../src/tenancy.js\";\n+\n+function fakeDb() {\n+  const written: unknown[] = [];\n+  const db = {\n+    collection: () => ({ get: async () => null }),\n+    query: async () => ({ records: [], exhausted: true }),\n+    // The authority applies the transaction, then the acknowledgement is lost.\n+    transaction: async (request: { operations: unknown[] }) => {\n+      written.push(...request.operations);\n+      throw Object.assign(new Error(\"commit outcome unknown\"), { code: FeltDBErrorCode.COMMIT_OUTCOME_UNKNOWN });\n+    }\n+  };\n+  return { db, written };\n+}\n+\n+describe(\"tenancy@1 commit outcome\", () => {\n+  it(\"does not report an unconfirmed commit as a conflict that wrote nothing\", async () => {\n+    const { db, written } = fakeDb();\n+    const tx = new TenancyTransaction(db as never);\n+    expect(await tx.get(\"_feltkit_tenants\", \"t1\")).toBeNull();\n+    tx.create(\"_feltkit_tenants\", \"t1\", { name: \"Acme\" });\n+    const error = (await tx.commit().then(() => null, e => e)) as { code?: string; message?: string } | null;\n+    expect(error).not.toBeNull();\n+    expect(written.length).toBe(1);\n+    // The record was written; the host must not tell the caller it was not.\n+    expect(error!.code).not.toBe(\"CONFLICT\");\n+    expect(error!.message).not.toMatch(/nothing was written/);\n+  });\n+});",
+  "patchTruncated": false,
+  "patchSha256": "f26269ca271464152b88025bd3e20f4845b0809c1010a30576cb6ad795c42bba"
+ }
+}
+{
+ "kind": "model",
+ "at": "2026-11-25T16:07:24.752Z",
+ "runId": "run_7",
+ "outcome": "completed"
+}
+{
+ "kind": "tool",
+ "at": "2026-11-25T16:07:33.562Z",
+ "callId": "toolu_01RGGdsQP2nWDk8d3tpXtSx3",
+ "tool": "repo_changes_publish",
+ "capability": "repo.changes.publish",
+ "input": {
+  "workspace": "fix-101",
+  "operation": "resolve-101",
+  "branch": "eve/issue-101-tenancy-commit-outcome",
+  "expectTree": "9a80f21063ef423d8b872290dd6f12eb076dd916",
+  "title": "Resolve #101: tenancy@1 commit no longer reports an unconfirmed commit as CONFLICT",
+  "message": "Resolve #101: map FeltDB errors in TenancyTransaction.commit()\n\nOnly PRECONDITION_FAILED becomes CONFLICT (\"nothing was written\").\nCOMMIT_OUTCOME_UNKNOWN and DURABILITY_FAILURE become OUTCOME_UNKNOWN with a\nhint to read before retrying; other FeltDB refusals go through feltdbRefusal,\nanything else is rethrown unchanged.",
+  "body": "Resolves #101.\n\n## What changed\n- `packages/appboundry-host/src/tenancy.ts`: `TenancyTransaction.commit()` used to turn every error from `db.transaction()` into `CONFLICT` with the message \"nothing was written\". It now maps errors the way `collections.ts` `commitError` does:\n  - `PRECONDITION_FAILED` → `CONFLICT` (\"nothing was written\"), same message as before.\n  - `COMMIT_OUTCOME_UNKNOWN` / `DURABILITY_FAILURE` → `OUTCOME_UNKNOWN`, with a hint to read the tenant and membership records before retrying.\n  - Other FeltDB refusals → `feltdbRefusal()` (UNAVAILABLE / INTERNAL / contract-changed CONFLICT). Any other error is rethrown unchanged.\n- `packages/appboundry-host/test/tenancy-commit-outcome.test.ts`: the regression test from the issue.\n\n## Test results\n- New test against **base**: **failed** on its assertion (`expected 'CONFLICT' not to be 'CONFLICT'`), 1 failed.\n- New test against **change**: **passed** (1/1).\n- Existing `packages/appboundry-host/test/tenancy.test.ts` against **change**: **passed** (7/7).\n- `build` (tsc -b) on change: passed.\n\n## Not done\n- The issue also suggests passing a stable `transactionId` so FeltDB can deduplicate a resend. That is not in this PR, to keep the change minimal. It can be a follow-up.\n- Errors that are not FeltDB errors are now rethrown as they are, not wrapped as CONFLICT."
+ },
+ "effect": "unknown"
+}
+{
+ "kind": "approval",
+ "at": "2026-11-25T16:07:33.575Z",
+ "interactionId": "wnazSx5nD71PJvSL",
+ "prompt": "Allow the agent to publish the verified working copy: a deterministic commit on an eve/ branch and a pull request: “Resolve #101: tenancy@1 commit no longer reports an unconfirmed commit as CONFLICT”?"
+}
+answers [] state approval

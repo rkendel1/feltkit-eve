@@ -53,10 +53,15 @@ export const app = feltkit({
       module: "./providers/github.mjs",
       export: "githubProvider",
       config: {
-        repositories: (process.env.EVE_REPOSITORIES ?? "rkendel1/appboundry").split(",").map((r) => r.trim()).filter(Boolean),
+        repositories: (process.env.EVE_REPOSITORIES ?? "rkendel1/appboundry,rkendel1/meetings").split(",").map((r) => r.trim()).filter(Boolean),
         ...(process.env.EVE_WORKDIR ? { workdir: process.env.EVE_WORKDIR } : {}),
         footer: "\n\n---\n_Opened by Eve._",
         checks: {
+          "rkendel1/meetings": {
+            prepare: { argv: ["sh", "-c", "npm ci --no-audit --no-fund"], timeoutMs: 900_000 },
+            build: { argv: ["npx", "tsc", "--noEmit"], timeoutMs: 300_000 },
+            test: { argv: ["npx", "feltkit", "test"], timeoutMs: 600_000 },
+          },
           "rkendel1/appboundry": {
             prepare: { argv: ["sh", "-c", "pnpm install --frozen-lockfile && pnpm build"], timeoutMs: 900_000 },
             build: { argv: ["pnpm", "build"], timeoutMs: 600_000 },

@@ -69,7 +69,11 @@ const capabilities = [
   providerCapability({
     name: "meetings.attend.say", version: 1, description: "Say something in the meeting's chat, as Eve.",
     input: s.object({ code: s.string(), text: s.string() }), output: s.unknown(), authorization: ["meeting.attend"],
-    handler: async ({ code, text }) => call("mutation", "chat:send", { code, text: String(text).slice(0, 4000) }),
+    handler: async ({ code, text }) => {
+      // Posting into a running call needs presence (a check-in within 45 s): check in first, as a person's client does.
+      await join(code);
+      return call("mutation", "chat:send", { code, text: String(text).slice(0, 4000) });
+    },
   }),
   providerCapability({
     name: "meetings.attend.context", version: 1,

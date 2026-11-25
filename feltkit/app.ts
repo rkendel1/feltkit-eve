@@ -72,6 +72,9 @@ export const app = feltkit({
       // Its tools, and all a person's grant names: the provider capabilities these functions call are their
       // implementation (FeltKit authorizes them by the agent's role under the grant that covered the function).
       capabilities: ["repo.*", "eve.bindings.resolve"],
+      // Where Eve executes: on this machine (development, FeltKit runs it), or a remote executor that serves eve's
+      // session protocol (the AppBoundry .app; until it exists, eve's own server started on its own as a reference).
+      ...(process.env.EVE_EXECUTOR_URL ? { executor: { url: process.env.EVE_EXECUTOR_URL, serviceKey: process.env.EVE_EXECUTOR_SERVICE_KEY ?? "" } } : {}),
     },
   },
 });

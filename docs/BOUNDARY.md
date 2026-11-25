@@ -1,5 +1,10 @@
 # Eve: the Vercel ↔ AppBoundry boundary
 
+> **Superseded in part (2026-11-25).** The deployment drawn below (Vercel rewriting `/api`, `/eve` and `/appport` to a
+> separate Node `eve-runtime` server) was a consequence of the first implementation, not the target. The target is the
+> FeltKit application on Vercel calling an executor on AppBoundry through [the execution contract](./EXECUTION-CONTRACT.md).
+> The ownership table and the gaps found remain accurate.
+
 Decision (2026-11-25): Eve is one application with a split deployment. **Vercel** serves the product; **AppBoundry's
 Hetzner host** runs Eve's execution: the FeltKit application with the integrated eve agent (`feltkit({ eve })`). No new
 agent runtime, no second database, no new authorization system.

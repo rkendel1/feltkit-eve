@@ -1,7 +1,7 @@
 /**
- * Everything the UI shows comes from eve-runtime's API as the signed-in person: eve's recorded sessions (FeltKit's
- * evidence of each), the Resolver receipts in FeltDB, and Resolver's current bindings. On Vercel the same paths are
- * rewritten to eve-runtime, so the client is same-origin and holds the session in an HttpOnly cookie.
+ * Everything the UI shows comes from the application's API as the signed-in person: eve's recorded sessions (FeltKit's
+ * evidence of each), the Resolver receipts in FeltDB, and Resolver's current bindings. On Vercel this UI is served by the
+ * same FeltKit application, so the client is same-origin and holds the session in an HttpOnly cookie.
  */
 import { createClient } from "@feltdb/feltkit/client";
 

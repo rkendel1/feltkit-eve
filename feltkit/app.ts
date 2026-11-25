@@ -33,7 +33,7 @@ export const app = feltkit({
   auth: {
     accounts: { roles: ["person"] },
     tenant: { name: "workspace", roles: ["owner", "member", "viewer", "agent"], create: "anyone" },
-    // Vercel forwards /api, /eve and /appport here: one trusted proxy, whose X-Forwarded-Host is the page's host.
+    // Vercel's router is one trusted proxy in front of the application: its X-Forwarded-Host is the page's host.
     session: { trustProxy: 1 },
   },
   dev: {

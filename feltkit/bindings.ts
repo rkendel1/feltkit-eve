@@ -29,12 +29,12 @@ export const bindings = app.collection(
   { tenant: true },
 );
 
-let client: ResolverClient | null = null;
-function resolver(): ResolverClient {
+let client: Promise<ResolverClient> | null = null;
+function resolver(): Promise<ResolverClient> {
   const url = process.env.RESOLVER_URL;
   const apiKey = process.env.RESOLVER_API_KEY;
   if (!url || !apiKey) fail("CONFIGURATION", "Resolver is not configured: set RESOLVER_URL and RESOLVER_API_KEY (a key that may read Eve's references).");
-  client ??= new ResolverClient({ url, apiKey, live: true });
+  client ??= ResolverClient.connect({ url, apiKey, live: true }).catch((error) => { client = null; throw error; });
   return client;
 }
 
@@ -77,7 +77,7 @@ export const resolve = app.action({
     const refs = [];
     for (const [name, ref] of Object.entries(REFERENCES)) {
       try {
-        const r = (await resolver().resolve(ref, { key: sessionId })) as { kind?: string; revision: number; selected?: { value?: unknown } & Record<string, unknown> };
+        const r = (await (await resolver()).resolve(ref, { key: sessionId })) as { kind?: string; revision: number; selected?: { value?: unknown } & Record<string, unknown> };
         const target = r.selected ?? {};
         refs.push({ name, ref, kind: r.kind ?? "value", revision: r.revision, value: "value" in target ? target.value : target });
       } catch (error) {
@@ -99,7 +99,7 @@ export const current = app.action({
     const out = [];
     for (const [name, ref] of Object.entries(REFERENCES)) {
       try {
-        const r = (await resolver().resolve(ref)) as { kind?: string; revision: number; ttlSeconds?: number; updatedAt?: string; selected?: { value?: unknown } & Record<string, unknown> };
+        const r = (await (await resolver()).resolve(ref)) as { kind?: string; revision: number; ttlSeconds?: number; updatedAt?: string; selected?: { value?: unknown } & Record<string, unknown> };
         const target = r.selected ?? {};
         out.push({ name, ref, kind: r.kind ?? KINDS[name as keyof typeof REFERENCES], revision: r.revision, ttlSeconds: r.ttlSeconds ?? null, updatedAt: r.updatedAt ?? null, value: "value" in target ? target.value : target });
       } catch (error) {

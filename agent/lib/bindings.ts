@@ -38,9 +38,9 @@ export const binding = (b: SessionBindings, name: string): Binding => {
 export const mayAct = (b: SessionBindings) => (binding(b, "profile").value?.tools ?? "engineer") !== "read-only";
 
 import { ResolverClient } from "@appport/resolver-client";
-let resolver: ResolverClient | null = null;
+let resolver: Promise<ResolverClient> | null = null;
 /** A model binding's credential (a Resolver secret reference): revealed into memory for the call, never recorded. */
 export async function credential(ref: string): Promise<string> {
-  resolver ??= new ResolverClient({ url: env("RESOLVER_URL"), apiKey: env("RESOLVER_API_KEY"), live: true });
-  return resolver.secret(ref);
+  resolver ??= ResolverClient.connect({ url: env("RESOLVER_URL"), apiKey: env("RESOLVER_API_KEY"), live: true }).catch((error) => { resolver = null; throw error; });
+  return (await resolver).secret(ref);
 }

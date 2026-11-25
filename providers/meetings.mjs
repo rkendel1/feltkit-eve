@@ -9,6 +9,7 @@
  * long-polls the timeline, so the model is asked to act only when something new happened.
  */
 import { defineProvider, providerCapability } from "@appport/core";
+import { AppPortError } from "@appport/protocol";
 import { s } from "@appport/schema";
 
 let URL_ = "";
@@ -16,15 +17,16 @@ let KEY = null;
 const WAIT_MS = 20_000;
 const POLL_MS = 1_500;
 
-class MeetingsError extends Error {
-  constructor(code, message) {
-    super(message);
-    this.code = code;
-  }
+const STANDARD = new Set(["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "CONFLICT", "RATE_LIMITED"]);
+
+/** Meetings' own refusal, kept: AppPort replaces a plain Error with "Internal error", so Eve would never see the reason. */
+function refused(code, message) {
+  const mapped = STANDARD.has(code) ? code : code === "INVALID_ARGUMENT" ? "INVALID_INPUT" : code === "FAILED_PRECONDITION" ? "meetings.FAILED_PRECONDITION" : "provider.UNAVAILABLE";
+  return new AppPortError(mapped, message);
 }
 
 async function call(kind, name, args) {
-  if (!KEY) throw new MeetingsError("NOT_CONFIGURED", "Eve has no Meetings credential (meetings-key) in this deployment.");
+  if (!KEY) throw refused("NOT_CONFIGURED", "Eve has no Meetings credential (meetings-key) in this deployment.");
   const response = await fetch(`${URL_}/api/${kind}/${name}`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${KEY}` },
@@ -32,7 +34,7 @@ async function call(kind, name, args) {
     signal: AbortSignal.timeout(30_000),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.ok === false) throw new MeetingsError(body?.error?.code ?? `HTTP_${response.status}`, body?.error?.message ?? `Meetings answered ${response.status}.`);
+  if (!response.ok || body.ok === false) throw refused(body?.error?.code ?? `HTTP_${response.status}`, body?.error?.message ?? `Meetings answered ${response.status}.`);
   return body.value;
 }
 

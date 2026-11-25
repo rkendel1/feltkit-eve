@@ -21,7 +21,7 @@
     "@appport/resolver-client": "0.3.2",
     "@appport/schema": "1.2.2",
     "@feltdb/core": ">=0.25.0 <0.26.0",
-    "@feltdb/feltkit": "0.5.3",
+    "@feltdb/feltkit": "0.5.4",
     "eve": "npm:@appport/eve@1.1.2",
     "react": "19.3.1",
     "react-dom": "19.3.1"
